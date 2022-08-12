@@ -1,7 +1,6 @@
 use core::fmt::Write;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
-use core::ops::Deref;
 
 static mut UART: MaybeUninit<Uart<0x10000000, Init>> = MaybeUninit::uninit();
 static mut INIT: bool = false;
@@ -12,7 +11,7 @@ pub fn initialize() {
     unsafe { INIT = true };
 }
 
-pub fn get_uart() -> impl Deref<Target = Uart<0x10000000, Init>> {
+pub fn get_uart() -> &'static Uart<0x10000000, Init> {
     unsafe {
         assert!(INIT);
         UART.assume_init_ref()

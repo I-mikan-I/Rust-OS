@@ -1,19 +1,27 @@
+#![warn(
+    future_incompatible,
+    nonstandard_style,
+    rust_2018_idioms,
+    rust_2021_compatibility,
+    trivial_casts,
+    noop_method_call
+)]
 #![no_std]
 #![no_main]
 #![feature(panic_info_message)]
 use core::arch::asm;
-use core::ops::Deref;
 
 #[macro_export]
 macro_rules! print {
     ($($args:tt)+) => {
         {
             use core::fmt::Write;
-            let _ = write!($crate::uart::get_uart().deref(), $($args)+);
+            let _ = write!($crate::uart::get_uart(), $($args)+);
         }
     };
 }
 
+#[macro_export]
 macro_rules! println {
     () => ({
         print!("\r\n")
@@ -29,7 +37,7 @@ macro_rules! println {
 #[no_mangle]
 pub extern "C" fn eh_personality() {}
 #[panic_handler]
-fn panic(info: &core::panic::PanicInfo) -> ! {
+fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
     print!("Aborting: ");
     if let Some(p) = info.location() {
         println!(
@@ -57,6 +65,14 @@ pub extern "C" fn abort() -> ! {
 pub extern "C" fn kmain() {
     uart::initialize();
 
+    let mut mm = page::Pmem::init();
+    let _ = mm.alloc(2);
+    let _ = mm.alloc(64);
+    let c = mm.alloc(3);
+    println!("{}", mm);
+    println!("freeing 3 pages...");
+    mm.dealloc(c);
+    println!("{}", mm);
     println!("This is my operating system!");
     println!("Typing...");
     loop {
@@ -100,4 +116,5 @@ pub extern "C" fn kmain() {
 }
 
 mod assembly;
+mod page;
 mod uart;
