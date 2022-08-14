@@ -3,6 +3,7 @@ use core::cmp::max;
 use core::fmt::{Display, Formatter};
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
+use core::sync::atomic::Ordering;
 
 // ========================= PAGES =========================
 
@@ -31,7 +32,7 @@ pub struct Pmem {
     _traits: PhantomData<*mut u8>,
 }
 #[non_exhaustive]
-pub struct IPage(usize, *const u8);
+pub struct IPage(usize, *mut u8);
 
 impl IPage {
     pub fn available(&self) -> bool {
@@ -79,7 +80,7 @@ impl Pmem {
         let num_pages = self.descriptors.len();
         let mut found = 0;
         let mut begin = usize::MAX;
-        let mut physical = core::ptr::null();
+        let mut physical = core::ptr::null_mut();
         for (i, p) in self.descriptors[..num_pages - pages].iter_mut().enumerate() {
             match p {
                 Page { flags: Empty } => {
@@ -92,7 +93,7 @@ impl Pmem {
             if found == pages {
                 begin = 1 + i - found;
                 p.flags = Last;
-                physical = (self.alloc_start + begin * PAGE_SIZE) as *const u8;
+                physical = (self.alloc_start + begin * PAGE_SIZE) as *mut u8;
                 assert_eq!(physical.align_offset(PAGE_SIZE), 0);
                 break;
             }
@@ -118,7 +119,7 @@ impl Pmem {
         );
         self.descriptors[index].flags = Empty;
     }
-    pub unsafe fn dealloc_phys(&mut self, phys: *const u8) {
+    pub unsafe fn dealloc_phys(&mut self, phys: *mut u8) {
         assert_eq!(phys.align_offset(PAGE_SIZE), 0);
         assert!((phys as usize) < HEAP_START + HEAP_SIZE);
         assert!((phys as usize) >= self.alloc_start);
@@ -214,15 +215,13 @@ impl Table {
     pub fn map(
         root: &mut Table,
         pmem: &mut Pmem,
-        vaddr: *const u8,
-        paddr: *const u8,
+        vaddr: usize,
+        paddr: usize,
         bits: u64,
         level: usize,
     ) {
-        assert_eq!(vaddr.align_offset(PAGE_SIZE), 0);
-        assert_eq!(paddr.align_offset(PAGE_SIZE), 0);
-        let vaddr = vaddr as usize;
-        let paddr = paddr as usize;
+        assert_eq!((vaddr as *const u8).align_offset(PAGE_SIZE), 0);
+        assert_eq!((paddr as *const u8).align_offset(PAGE_SIZE), 0);
         assert_ne!(bits & entry_bits::RWE, 0);
         let vpn = [
             vaddr >> 12 & 0x1ff,
@@ -251,7 +250,7 @@ impl Table {
             }
             if entry.is_valid() {
                 unsafe {
-                    pmem.dealloc_phys(entry.get_phys() as *const u8);
+                    pmem.dealloc_phys(entry.get_phys() as *mut u8);
                 }
             }
         }
@@ -317,10 +316,10 @@ extern "C" {
 
 fn id_map_range(root: &mut Table, alloc: &mut Pmem, start: usize, end: usize, bits: u64) {
     let mut addr = start & !(PAGE_SIZE - 1);
-    let pages = (end - start).div_ceil(PAGE_SIZE);
+    let pages = (end - addr).div_ceil(PAGE_SIZE);
     let pages = max(1, pages);
     for _ in 0..pages {
-        Table::map(root, alloc, addr as *const u8, addr as *const u8, bits, 0);
+        Table::map(root, alloc, addr, addr, bits, 0);
         addr += 1 << 12;
     }
 }
@@ -381,5 +380,6 @@ pub fn id_map(root: &mut Table, alloc: &mut Pmem, kheap_head: usize, kheap_pages
             entry_bits::READ_WRITE,
         );
     }
-    id_map_range(root, alloc, 0x10000000, 0x10000000, entry_bits::READ_WRITE);
+
+    id_map_range(root, alloc, 0x10000000, 0x1000000F, entry_bits::READ_WRITE);
 }

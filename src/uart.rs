@@ -2,20 +2,15 @@ use core::fmt::Write;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 
-static mut UART: MaybeUninit<Uart<0x10000000, Init>> = MaybeUninit::uninit();
-static mut INIT: bool = false;
+static mut UART: Option<Uart<0x10000000, Init>> = None;
 
 pub fn initialize() {
     let uart = unsafe { Uart::<0x10000000, Uninit>::new().init() };
-    unsafe { UART.write(uart) };
-    unsafe { INIT = true };
+    unsafe { UART = Some(uart) };
 }
 
 pub fn get_uart() -> &'static Uart<0x10000000, Init> {
-    unsafe {
-        assert!(INIT);
-        UART.assume_init_ref()
-    }
+    unsafe { UART.as_ref().unwrap() }
 }
 
 pub struct Uninit {}

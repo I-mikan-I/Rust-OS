@@ -8,7 +8,9 @@ edition = "2021"
 [dependencies]
 
 [profile.release]
-strip = true
+strip = false
+debug = true
 opt-level = "s"
 lto = true
 codegen-units = 4
+debug-assertions = true

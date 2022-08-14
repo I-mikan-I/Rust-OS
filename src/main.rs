@@ -72,15 +72,15 @@ extern "C" {
 pub extern "C" fn kinit() -> usize {
     uart::initialize();
 
-    let mut mm = page::Pmem::init();
-    let mut kmem = kmem::Kmem::init(&mut mm);
+    let mut mm = Pmem::init();
+    let mut kmem = Kmem::init(&mut mm);
     let head = kmem.get_head() as usize;
     let pages = kmem.get_allocations();
     page::id_map(kmem.get_root(), &mut mm, head, pages);
     let root_u: *mut Table = kmem.get_root();
     #[cfg(debug_assertions)]
     {
-        let p = 0x80000100_usize;
+        let p = 0x10000005_usize;
         let m = Table::virt_to_phys(kmem.get_root(), p as *const u8).unwrap_or(0);
         assert_eq!(p, m);
     }
