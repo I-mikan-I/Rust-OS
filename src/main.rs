@@ -9,6 +9,9 @@
 #![no_std]
 #![no_main]
 #![feature(panic_info_message)]
+#![feature(int_roundings)]
+use crate::kmem::Kmem;
+use crate::page::{Pmem, Table};
 use core::arch::asm;
 
 #[macro_export]
@@ -61,18 +64,40 @@ pub extern "C" fn abort() -> ! {
     }
 }
 
+extern "C" {
+    static mut KERNEL_TABLE: usize;
+}
+
 #[no_mangle]
-pub extern "C" fn kmain() {
+pub extern "C" fn kinit() -> usize {
     uart::initialize();
 
     let mut mm = page::Pmem::init();
-    let _ = mm.alloc(2);
-    let _ = mm.alloc(64);
-    let c = mm.alloc(3);
-    println!("{}", mm);
-    println!("freeing 3 pages...");
-    mm.dealloc(c);
-    println!("{}", mm);
+    let mut kmem = kmem::Kmem::init(&mut mm);
+    let head = kmem.get_head() as usize;
+    let pages = kmem.get_allocations();
+    page::id_map(kmem.get_root(), &mut mm, head, pages);
+    let root_u: *mut Table = kmem.get_root();
+    #[cfg(debug_assertions)]
+    {
+        let p = 0x80000100_usize;
+        let m = Table::virt_to_phys(kmem.get_root(), p as *const u8).unwrap_or(0);
+        assert_eq!(p, m);
+    }
+    println!("\nALLOCATIONS:\n{}", mm);
+    #[allow(trivial_casts)]
+    unsafe {
+        MM = Some(mm);
+        KERNEL_TABLE = root_u as usize;
+        KMEM = Some(kmem);
+    }
+    (root_u as usize >> 12) | (8 << 60)
+}
+
+static mut MM: Option<Pmem> = None;
+static mut KMEM: Option<Kmem> = None;
+#[no_mangle]
+pub extern "C" fn kmain() {
     println!("This is my operating system!");
     println!("Typing...");
     loop {
@@ -116,5 +141,6 @@ pub extern "C" fn kmain() {
 }
 
 mod assembly;
+mod kmem;
 mod page;
 mod uart;
