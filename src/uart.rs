@@ -1,10 +1,10 @@
 use core::fmt::Write;
 use core::marker::PhantomData;
-use core::mem::MaybeUninit;
 
 static mut UART: Option<Uart<0x10000000, Init>> = None;
 
 pub fn initialize() {
+    unsafe {assert!(UART.is_none())}
     let uart = unsafe { Uart::<0x10000000, Uninit>::new().init() };
     unsafe { UART = Some(uart) };
 }
@@ -85,8 +85,6 @@ fn uart_get(base_addr: usize) -> Option<u8> {
 fn uart_put(base_addr: usize, c: u8) {
     let ptr = base_addr as *mut u8;
     unsafe {
-        // If we get here, the transmitter is empty, so transmit
-        // our stuff!
         ptr.add(0).write_volatile(c);
     }
 }

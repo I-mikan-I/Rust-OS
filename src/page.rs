@@ -3,7 +3,6 @@ use core::cmp::max;
 use core::fmt::{Display, Formatter};
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
-use core::sync::atomic::Ordering;
 
 // ========================= PAGES =========================
 
