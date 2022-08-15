@@ -78,7 +78,6 @@ pub extern "C" fn kinit() -> usize {
     let head = kmem.get_head() as usize;
     let pages = kmem.get_allocations();
     page::id_map(kmem.get_root(), &mut mm, head, pages);
-    let bytes = kmem.kamlloc(9);
     let root_u: *mut Table = kmem.get_root();
     #[cfg(debug_assertions)]
     {

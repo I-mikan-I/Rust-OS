@@ -1,5 +1,7 @@
 use crate::page;
 use crate::page::{Table, PAGE_SIZE};
+use core::fmt::{Display, Formatter, Pointer};
+use core::mem::MaybeUninit;
 
 const PAGES_POW: usize = 6;
 const MIN_SIZE_POW: usize = 7;
@@ -76,13 +78,14 @@ impl BuddyMeta {
                 assert_eq!(node.get_level(), 0b111111);
                 break;
             }
-            let node_size = MAX_ALLOCATION >> level;
+            let node_size = 1 << (MAX_ALLOCATION - level - 1);
             if addr >= current_addr + node_size {
                 current_addr += node_size;
                 current = BuddyMeta::get_right(current);
             } else {
                 current = BuddyMeta::get_left(current);
             }
+            level += 1;
         }
         current
     }
@@ -151,8 +154,8 @@ impl Kmem {
                 if max_pow - node.get_level() as usize >= pow {
                     let left = meta.access(BuddyMeta::get_left(current));
                     let right = meta.access(BuddyMeta::get_right(current));
-                    let left_size = max_pow - left.get_level() as usize;
-                    let right_size = max_pow - right.get_level() as usize;
+                    let left_size = max_pow.saturating_sub(left.get_level() as usize);
+                    let right_size = max_pow.saturating_sub(right.get_level() as usize);
                     if left_size >= pow && right_size >= pow {
                         if right_size < left_size {
                             current = BuddyMeta::get_right(current);
@@ -194,5 +197,57 @@ impl Kmem {
             chosen
         );
         ptr
+    }
+}
+
+impl Display for Kmem {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        let meta = unsafe { &*self.head };
+        let mut queue: [usize; (1 << (MAX_ALLOCATION - MIN_SIZE_POW + 1)) - 1] =
+            [0; (1 << (MAX_ALLOCATION - MIN_SIZE_POW + 1)) - 1];
+        let mut index_read = 0;
+        let mut index_write = 1;
+        let mut level = 0;
+        writeln!(f, "====================META====================")?;
+        writeln!(
+            f,
+            "SIZE: {} META: {:p} DATA: {:p} -> {:p}",
+            self.alloc,
+            self.head,
+            self.data_start,
+            unsafe { self.data_start.add((self.alloc - 1) * PAGE_SIZE) }
+        )?;
+        writeln!(f, "===================ALLOC====================")?;
+        while index_read < index_write {
+            writeln!(f, "--------------------L {}--------------------", level)?;
+            writeln!(f, "Size: {}", 1 << (MAX_ALLOCATION - level))?;
+            #[allow(clippy::mut_range_bound)]
+            for i in index_read..index_write {
+                let i = queue[i];
+                let node = meta.access(i);
+                writeln!(
+                    f,
+                    "INDEX {} (0x{:x}):\t {}",
+                    i,
+                    meta.index_to_addr(self.data_start as usize, i),
+                    node
+                )?;
+                if node.parent() {
+                    queue[index_write] = BuddyMeta::get_left(i);
+                    queue[index_write + 1] = BuddyMeta::get_right(i);
+                    index_write += 2;
+                }
+                index_read += 1;
+            }
+            writeln!(f, "-------------------------------------------")?;
+            level += 1;
+        }
+        write!(f, "====================END====================")
+    }
+}
+
+impl Display for BuddyLeaf {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        write!(f, "PARENT?: {} LEVEL: {}", self.parent(), self.get_level())
     }
 }
