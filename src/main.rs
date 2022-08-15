@@ -71,12 +71,14 @@ extern "C" {
 #[no_mangle]
 pub extern "C" fn kinit() -> usize {
     uart::initialize();
+    println!("uart initialized");
 
     let mut mm = Pmem::init();
     let mut kmem = Kmem::init(&mut mm);
     let head = kmem.get_head() as usize;
     let pages = kmem.get_allocations();
     page::id_map(kmem.get_root(), &mut mm, head, pages);
+    let bytes = kmem.kamlloc(9);
     let root_u: *mut Table = kmem.get_root();
     #[cfg(debug_assertions)]
     {

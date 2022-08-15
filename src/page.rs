@@ -67,7 +67,6 @@ impl Pmem {
         match ip {
             IPage(usize::MAX, _) => ip,
             IPage(_, page_begin) => {
-                let page_begin = page_begin as *mut u8;
                 unsafe {
                     page_begin.write_bytes(0, pages * PAGE_SIZE);
                 }
