@@ -1,7 +1,6 @@
 use crate::page;
 use crate::page::{Table, PAGE_SIZE};
-use core::fmt::{Display, Formatter, Pointer};
-use core::mem::MaybeUninit;
+use core::fmt::{Display, Formatter};
 
 const PAGES_POW: usize = 6;
 const MIN_SIZE_POW: usize = 7;
@@ -29,7 +28,7 @@ impl BuddyLeaf {
         self.0 >> 2
     }
     fn set_level(&mut self, level: u8) {
-        self.0 |= level << 2
+        self.0 = level << 2 | self.0 & 0b11
     }
 }
 #[repr(transparent)]
@@ -58,6 +57,9 @@ impl BuddyMeta {
         } else {
             other - 1
         }
+    }
+    pub fn get_level(index: usize) -> u8 {
+        (usize::BITS - (index + 1).leading_zeros() - 1) as u8
     }
     pub fn access_mut(&mut self, index: usize) -> &mut BuddyLeaf {
         &mut self.nodes[index]
@@ -92,16 +94,30 @@ impl BuddyMeta {
     pub fn index_to_addr(&self, begin_alloc: usize, index: usize) -> usize {
         assert_eq!(begin_alloc % PAGE_SIZE, 0);
         assert!(index < self.nodes.len());
-        let level = usize::BITS - (index + 1).leading_zeros() - 1;
+        let level = Self::get_level(index);
         let pow = MAX_ALLOCATION - level as usize;
         let offset = (1 << pow) * ((index + 1) & ((1 << level) - 1));
         assert!(offset <= BuddyMeta::largest());
         begin_alloc + offset
     }
+    pub fn levels_recurse(&mut self, begin: usize) {
+        let mut current = begin;
+        loop {
+            if current == 0 {
+                break;
+            }
+            current = BuddyMeta::get_parent(current);
+            let left_level = self.access(BuddyMeta::get_left(current)).get_level();
+            let right_level = self.access(BuddyMeta::get_right(current)).get_level();
+            let node = self.access_mut(current);
+            node.set_level(core::cmp::min(left_level, right_level));
+            node.set_parent();
+        }
+    }
 }
 
 pub struct Kmem {
-    head: *mut BuddyMeta, // BuddyMeta
+    head: *mut BuddyMeta, // todo change to owned reference
     page_table: *mut Table,
     alloc: usize,
     data_start: *mut u8,
@@ -133,7 +149,7 @@ impl Kmem {
     pub fn get_root(&mut self) -> &mut Table {
         unsafe { &mut *self.page_table }
     }
-    pub fn kamlloc(&mut self, pow: usize) -> *mut u8 {
+    pub fn kmalloc(&mut self, pow: usize) -> *mut u8 {
         assert!(pow >= MIN_SIZE_POW);
         let meta = unsafe { &mut *self.head };
         // parent and free -> a child is a free leaf
@@ -180,23 +196,47 @@ impl Kmem {
         let node = meta.access_mut(current);
         assert!(node.leaf());
         node.set_level(u8::MAX);
-        loop {
-            if current == 0 {
-                break;
-            }
-            current = BuddyMeta::get_parent(current);
-            let left_level = meta.access(BuddyMeta::get_left(current)).get_level();
-            let right_level = meta.access(BuddyMeta::get_right(current)).get_level();
-            let node = meta.access_mut(current);
-            node.set_level(core::cmp::min(left_level, right_level));
-            node.set_parent();
-        }
+        meta.levels_recurse(current);
         let ptr: *mut u8 = meta.index_to_addr(self.data_start as usize, chosen) as *mut u8;
         debug_assert_eq!(
             meta.addr_to_index(self.data_start as usize, ptr as usize),
             chosen
         );
         ptr
+    }
+    //todo add safe wrapper to slice
+    pub fn kzalloc(&mut self, pow: usize) -> *mut u8 {
+        let uninit = self.kmalloc(pow);
+        unsafe {
+            uninit.write_bytes(0, 1 << pow);
+        }
+        uninit
+    }
+    pub fn kfree(&mut self, addr: *mut u8) {
+        let meta = unsafe{&mut *self.head};
+        let mut index = meta.addr_to_index(self.data_start as usize, addr as usize);
+        println!("freeing index: {}", index);
+        let node = meta.access_mut(index);
+        assert!(node.leaf());
+        let mut buddy_index = BuddyMeta::get_buddy(index);
+        let mut buddy = meta.access_mut(buddy_index);
+        //coalesce
+        while buddy.leaf() && buddy.get_level() < 0b111111 {
+            let parent = BuddyMeta::get_parent(index);
+            meta.access_mut(parent).set_leaf();
+            index = parent;
+            if index == 0 {
+                break
+            }
+            buddy_index = BuddyMeta::get_buddy(index);
+            buddy = meta.access_mut(buddy_index);
+        }
+        //update levels
+        println!("recurse at index {}", index);
+        let node = meta.access_mut(index);
+        println!("setting level: {}", BuddyMeta::get_level(index));
+        node.set_level(BuddyMeta::get_level(index));
+        meta.levels_recurse(index);
     }
 }
 

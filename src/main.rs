@@ -78,6 +78,28 @@ pub extern "C" fn kinit() -> usize {
     let head = kmem.get_head() as usize;
     let pages = kmem.get_allocations();
     page::id_map(kmem.get_root(), &mut mm, head, pages);
+
+    println!("alloc 3");
+    let b = kmem.kmalloc(9);
+    let b2 = kmem.kmalloc(9);
+    let b3 = kmem.kmalloc(9);
+
+    println!("{}", kmem);
+    println!("free first");
+    kmem.kfree(b);
+    println!("{}", kmem);
+    kmem.kfree(b2);
+    println!("free second");
+    println!("{}", kmem);
+    println!("free third");
+    kmem.kfree(b3);
+    println!("{}", kmem);
+
+    let b = kmem.kmalloc(9);
+    let b2 = kmem.kmalloc(9);
+    let b3 = kmem.kmalloc(9);
+    println!("{}", kmem);
+
     let root_u: *mut Table = kmem.get_root();
     #[cfg(debug_assertions)]
     {
