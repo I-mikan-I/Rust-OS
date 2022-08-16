@@ -20,29 +20,24 @@ _start:
 
 2:
     la sp, _stack_end
-    li		t0, (0b11 << 11) #| (1 << 7) | (1 << 3)
+    li		t0, (0b11 << 11)
     csrw	mstatus, t0
+    csrw    mie, zero
     la		t1, kinit
     csrw	mepc, t1
-    la		t2, asm_trap_vector
-    csrw	mtvec, t2
-    li		t3, (1 << 3) | (1 << 7) | (1 << 11)
     la		ra, 2f
     mret
 
 2:
-    li t0, (1 << 8) | (1 << 5)
-    csrw sstatus, t0
+    li t0, (0b01 << 11) | (1 << 7) | (1 << 5)
+    csrw mstatus, t0
+    la t2, asm_trap_vector
+    csrw mtvec, t2
     la t1, kmain
-    csrw sepc, t1
-    li t2, (1 << 1) | ( 1 << 5) | (1 << 9)
-    csrw mideleg, t2
-    csrw sie, t2
-    la t3, asm_trap_vector
-    csrw stvec, t3
-    csrw satp, a0
-    sfence.vma
-    sret
+    csrw mepc, t1
+    li t2, 0x888
+    csrw mie, t2
+    mret
 
 3:
     wfi

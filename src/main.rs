@@ -3,15 +3,16 @@
     nonstandard_style,
     rust_2018_idioms,
     rust_2021_compatibility,
-    trivial_casts,
     noop_method_call
 )]
+#![allow(trivial_casts)]
 #![no_std]
 #![no_main]
 #![feature(panic_info_message)]
+#![feature(alloc_error_handler)]
 #![feature(int_roundings)]
 use crate::kmem::Kmem;
-use crate::page::{Pmem, Table};
+use crate::page::{Pmem, Table, PAGE_SIZE};
 use core::arch::asm;
 
 #[macro_export]
@@ -69,7 +70,7 @@ extern "C" {
 }
 
 #[no_mangle]
-pub extern "C" fn kinit() -> usize {
+pub extern "C" fn kinit() {
     uart::initialize();
     println!("uart initialized");
 
@@ -78,50 +79,56 @@ pub extern "C" fn kinit() -> usize {
     let head = kmem.get_head() as usize;
     let pages = kmem.get_allocations();
     page::id_map(kmem.get_root(), &mut mm, head, pages);
-
-    println!("alloc 3");
-    let b = kmem.kmalloc(9);
-    let b2 = kmem.kmalloc(9);
-    let b3 = kmem.kmalloc(9);
-
-    println!("{}", kmem);
-    println!("free first");
-    kmem.kfree(b);
-    println!("{}", kmem);
-    kmem.kfree(b2);
-    println!("free second");
-    println!("{}", kmem);
-    println!("free third");
-    kmem.kfree(b3);
-    println!("{}", kmem);
-
-    let b = kmem.kmalloc(9);
-    let b2 = kmem.kmalloc(9);
-    let b3 = kmem.kmalloc(9);
-    println!("{}", kmem);
-
     let root_u: *mut Table = kmem.get_root();
+    let satp_value = cpu::build_satp(cpu::SatpMode::Sv39, 0, root_u as usize);
+    unsafe {
+        cpu::mscratch_write((&mut cpu::KERNEL_TRAP_FRAME[0] as *mut _) as usize);
+        cpu::sscratch_write(cpu::mscratch_read());
+        cpu::KERNEL_TRAP_FRAME[0].satp = satp_value;
+        let stack = mm.zalloc(1).physical().add(PAGE_SIZE) as *mut u8;
+        cpu::KERNEL_TRAP_FRAME[0].stack = stack;
+        page::id_map_range(
+            kmem.get_root(),
+            &mut mm,
+            stack.sub(PAGE_SIZE) as usize,
+            stack as usize,
+            page::entry_bits::READ_WRITE,
+        );
+        page::id_map_range(
+            kmem.get_root(),
+            &mut mm,
+            cpu::mscratch_read(),
+            cpu::mscratch_read() + core::mem::size_of::<cpu::TrapFrame>(),
+            page::entry_bits::READ_WRITE,
+        );
+    }
+
+    println!("\nALLOCATIONS:\n{}", mm);
     #[cfg(debug_assertions)]
     {
         let p = 0x10000005_usize;
         let m = Table::virt_to_phys(kmem.get_root(), p as *const u8).unwrap_or(0);
         assert_eq!(p, m);
     }
-    println!("\nALLOCATIONS:\n{}", mm);
-    #[allow(trivial_casts)]
+    kmem::GA.0.replace(Some(kmem));
     unsafe {
         MM = Some(mm);
         KERNEL_TABLE = root_u as usize;
-        KMEM = Some(kmem);
     }
-    (root_u as usize >> 12) | (8 << 60)
+    cpu::satp_write(satp_value);
+    cpu::satp_fence_asid(0);
 }
 
 static mut MM: Option<Pmem> = None;
-static mut KMEM: Option<Kmem> = None;
 #[no_mangle]
 pub extern "C" fn kmain() {
     println!("This is my operating system!");
+
+    println!("triggering page fault...");
+    unsafe {
+        (0x0 as *mut u64).write_volatile(0);
+    }
+
     println!("Typing...");
     loop {
         if let Some(c) = uart::get_uart().get() {
@@ -164,6 +171,8 @@ pub extern "C" fn kmain() {
 }
 
 mod assembly;
+mod cpu;
 mod kmem;
 mod page;
+mod trap;
 mod uart;

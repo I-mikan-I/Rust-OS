@@ -183,7 +183,7 @@ pub struct Table {
 #[derive(Copy, Clone)]
 pub struct Entry(u64);
 
-mod entry_bits {
+pub mod entry_bits {
     type Flag = u64;
     pub const NONE: Flag = 0;
 
@@ -312,7 +312,7 @@ extern "C" {
     static KERNEL_STACK_END: usize;
 }
 
-fn id_map_range(root: &mut Table, alloc: &mut Pmem, start: usize, end: usize, bits: u64) {
+pub fn id_map_range(root: &mut Table, alloc: &mut Pmem, start: usize, end: usize, bits: u64) {
     let mut addr = start & !(PAGE_SIZE - 1);
     let pages = (end - addr).div_ceil(PAGE_SIZE);
     let pages = max(1, pages);

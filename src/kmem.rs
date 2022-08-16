@@ -1,6 +1,9 @@
 use crate::page;
 use crate::page::{Table, PAGE_SIZE};
+use core::alloc::{GlobalAlloc, Layout};
+use core::cell::RefCell;
 use core::fmt::{Display, Formatter};
+use core::ops::Deref;
 
 const PAGES_POW: usize = 6;
 const MIN_SIZE_POW: usize = 7;
@@ -149,7 +152,7 @@ impl Kmem {
     pub fn get_root(&mut self) -> &mut Table {
         unsafe { &mut *self.page_table }
     }
-    pub fn kmalloc(&mut self, pow: usize) -> *mut u8 {
+    pub fn kmalloc(&self, pow: usize) -> *mut u8 {
         assert!(pow >= MIN_SIZE_POW);
         let meta = unsafe { &mut *self.head };
         // parent and free -> a child is a free leaf
@@ -205,15 +208,15 @@ impl Kmem {
         ptr
     }
     //todo add safe wrapper to slice
-    pub fn kzalloc(&mut self, pow: usize) -> *mut u8 {
+    pub fn kzalloc(&self, pow: usize) -> *mut u8 {
         let uninit = self.kmalloc(pow);
         unsafe {
             uninit.write_bytes(0, 1 << pow);
         }
         uninit
     }
-    pub fn kfree(&mut self, addr: *mut u8) {
-        let meta = unsafe{&mut *self.head};
+    pub fn kfree(&self, addr: *mut u8) {
+        let meta = unsafe { &mut *self.head };
         let mut index = meta.addr_to_index(self.data_start as usize, addr as usize);
         println!("freeing index: {}", index);
         let node = meta.access_mut(index);
@@ -226,7 +229,7 @@ impl Kmem {
             meta.access_mut(parent).set_leaf();
             index = parent;
             if index == 0 {
-                break
+                break;
             }
             buddy_index = BuddyMeta::get_buddy(index);
             buddy = meta.access_mut(buddy_index);
@@ -290,4 +293,52 @@ impl Display for BuddyLeaf {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         write!(f, "PARENT?: {} LEVEL: {}", self.parent(), self.get_level())
     }
+}
+
+pub struct KmemAllocator(pub RefCell<Option<Kmem>>);
+
+impl Display for KmemAllocator {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        if let Some(ref km) = self.0.borrow().deref() {
+            km.fmt(f)
+        } else {
+            write!(f, "NONE")
+        }
+    }
+}
+
+unsafe impl GlobalAlloc for KmemAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        println!(
+            "allocating memory: size {} align {}",
+            layout.size(),
+            layout.align()
+        );
+        if let Some(km) = self.0.borrow().deref() {
+            let size = layout.size() - 1;
+            let log2 = usize::BITS - size.leading_zeros();
+            km.kzalloc(core::cmp::max(log2 as usize, 7))
+        } else {
+            core::ptr::null_mut()
+        }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, l: Layout) {
+        println!("freeing memory: size {} align {}", l.size(), l.align());
+        if let Some(km) = self.0.borrow().deref() {
+            km.kfree(ptr)
+        } else {
+            panic!("memory corruption")
+        }
+    }
+}
+
+// TODO not actually sync, but right now we only support one HART
+unsafe impl Sync for KmemAllocator {}
+#[global_allocator]
+pub static GA: KmemAllocator = KmemAllocator(RefCell::new(None));
+
+#[alloc_error_handler]
+fn alloc_error_handler(l: core::alloc::Layout) -> ! {
+    panic!("could not allocate memory: size: {}", l.size())
 }
