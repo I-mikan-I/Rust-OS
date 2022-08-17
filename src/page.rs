@@ -62,6 +62,9 @@ impl Pmem {
             }
         }
     }
+    pub fn descriptors(&self) -> &[Page] {
+        self.descriptors
+    }
     pub fn zalloc(&mut self, pages: usize) -> IPage {
         let ip = self.alloc(pages);
         match ip {
@@ -299,19 +302,6 @@ impl Entry {
     }
 }
 
-extern "C" {
-    static TEXT_START: usize;
-    static TEXT_END: usize;
-    static DATA_START: usize;
-    static DATA_END: usize;
-    static RODATA_START: usize;
-    static RODATA_END: usize;
-    static BSS_START: usize;
-    static BSS_END: usize;
-    static KERNEL_STACK_START: usize;
-    static KERNEL_STACK_END: usize;
-}
-
 pub fn id_map_range(root: &mut Table, alloc: &mut Pmem, start: usize, end: usize, bits: u64) {
     let mut addr = start & !(PAGE_SIZE - 1);
     let pages = (end - addr).div_ceil(PAGE_SIZE);
@@ -320,64 +310,4 @@ pub fn id_map_range(root: &mut Table, alloc: &mut Pmem, start: usize, end: usize
         Table::map(root, alloc, addr, addr, bits, 0);
         addr += 1 << 12;
     }
-}
-
-pub fn id_map(root: &mut Table, alloc: &mut Pmem, kheap_head: usize, kheap_pages: usize) {
-    unsafe {
-        println!("TEXT:   0x{:x} -> 0x{:x}", TEXT_START, TEXT_END);
-        println!("RODATA: 0x{:x} -> 0x{:x}", RODATA_START, RODATA_END);
-        println!("DATA:   0x{:x} -> 0x{:x}", DATA_START, DATA_END);
-        println!("BSS:    0x{:x} -> 0x{:x}", BSS_START, BSS_END);
-        println!(
-            "STACK:  0x{:x} -> 0x{:x}",
-            KERNEL_STACK_START, KERNEL_STACK_END
-        );
-        println!(
-            "HEAP:   0x{:x} -> 0x{:x}",
-            kheap_head,
-            kheap_head + kheap_pages * 4096
-        );
-    }
-
-    id_map_range(
-        root,
-        alloc,
-        kheap_head,
-        kheap_head + kheap_pages * PAGE_SIZE,
-        entry_bits::READ_WRITE,
-    );
-
-    id_map_range(
-        root,
-        alloc,
-        alloc.descriptors.as_ptr() as usize,
-        alloc.descriptors.as_ptr() as usize
-            + alloc.descriptors.len() * core::mem::size_of::<Page>(),
-        entry_bits::READ_WRITE,
-    );
-    unsafe {
-        id_map_range(root, alloc, TEXT_START, TEXT_END, entry_bits::READ_EXECUTE);
-
-        id_map_range(
-            root,
-            alloc,
-            RODATA_START,
-            RODATA_END,
-            entry_bits::READ_EXECUTE,
-        );
-
-        id_map_range(root, alloc, DATA_START, DATA_END, entry_bits::READ_WRITE);
-
-        id_map_range(root, alloc, BSS_START, BSS_END, entry_bits::READ_WRITE);
-
-        id_map_range(
-            root,
-            alloc,
-            KERNEL_STACK_START,
-            KERNEL_STACK_END,
-            entry_bits::READ_WRITE,
-        );
-    }
-
-    id_map_range(root, alloc, 0x10000000, 0x1000000F, entry_bits::READ_WRITE);
 }

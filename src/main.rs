@@ -76,32 +76,10 @@ pub extern "C" fn kinit() {
 
     let mut mm = Pmem::init();
     let mut kmem = Kmem::init(&mut mm);
-    let head = kmem.get_head() as usize;
-    let pages = kmem.get_allocations();
-    page::id_map(kmem.get_root(), &mut mm, head, pages);
+    kmem.init_mmu();
+    kmem.init_trap_memory(&mut mm);
+    kmem.id_map_kernel(&mut mm);
     let root_u: *mut Table = kmem.get_root();
-    let satp_value = cpu::build_satp(cpu::SatpMode::Sv39, 0, root_u as usize);
-    unsafe {
-        cpu::mscratch_write((&mut cpu::KERNEL_TRAP_FRAME[0] as *mut _) as usize);
-        cpu::sscratch_write(cpu::mscratch_read());
-        cpu::KERNEL_TRAP_FRAME[0].satp = satp_value;
-        let stack = mm.zalloc(1).physical().add(PAGE_SIZE) as *mut u8;
-        cpu::KERNEL_TRAP_FRAME[0].stack = stack;
-        page::id_map_range(
-            kmem.get_root(),
-            &mut mm,
-            stack.sub(PAGE_SIZE) as usize,
-            stack as usize,
-            page::entry_bits::READ_WRITE,
-        );
-        page::id_map_range(
-            kmem.get_root(),
-            &mut mm,
-            cpu::mscratch_read(),
-            cpu::mscratch_read() + core::mem::size_of::<cpu::TrapFrame>(),
-            page::entry_bits::READ_WRITE,
-        );
-    }
 
     println!("\nALLOCATIONS:\n{}", mm);
     #[cfg(debug_assertions)]
@@ -115,8 +93,6 @@ pub extern "C" fn kinit() {
         MM = Some(mm);
         KERNEL_TABLE = root_u as usize;
     }
-    cpu::satp_write(satp_value);
-    cpu::satp_fence_asid(0);
 }
 
 static mut MM: Option<Pmem> = None;

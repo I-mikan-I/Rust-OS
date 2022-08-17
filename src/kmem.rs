@@ -1,9 +1,22 @@
-use crate::page;
 use crate::page::{Table, PAGE_SIZE};
+use crate::{cpu, page, Pmem};
 use core::alloc::{GlobalAlloc, Layout};
 use core::cell::RefCell;
 use core::fmt::{Display, Formatter};
 use core::ops::Deref;
+
+extern "C" {
+    static TEXT_START: usize;
+    static TEXT_END: usize;
+    static DATA_START: usize;
+    static DATA_END: usize;
+    static RODATA_START: usize;
+    static RODATA_END: usize;
+    static BSS_START: usize;
+    static BSS_END: usize;
+    static KERNEL_STACK_START: usize;
+    static KERNEL_STACK_END: usize;
+}
 
 const PAGES_POW: usize = 6;
 const MIN_SIZE_POW: usize = 7;
@@ -127,7 +140,7 @@ pub struct Kmem {
 }
 
 impl Kmem {
-    pub fn init(pmem: &mut page::Pmem) -> Self {
+    pub fn init(pmem: &mut Pmem) -> Self {
         let k_alloc = pmem.zalloc(1 + (1 << PAGES_POW));
         assert!(k_alloc.available());
         let head = k_alloc.physical() as *mut BuddyMeta;
@@ -240,6 +253,104 @@ impl Kmem {
         println!("setting level: {}", BuddyMeta::get_level(index));
         node.set_level(BuddyMeta::get_level(index));
         meta.levels_recurse(index);
+    }
+    // after mmu has been initialized
+    pub fn init_trap_memory(&self, mm: &mut Pmem) {
+        let satp_value = cpu::build_satp(cpu::SatpMode::Sv39, 0, self.page_table as usize);
+        unsafe {
+            cpu::mscratch_write((&mut cpu::KERNEL_TRAP_FRAME[0] as *mut _) as usize);
+            cpu::sscratch_write(cpu::mscratch_read());
+            cpu::KERNEL_TRAP_FRAME[0].satp = satp_value;
+            let stack = mm.zalloc(1).physical().add(PAGE_SIZE) as *mut u8;
+            cpu::KERNEL_TRAP_FRAME[0].stack = stack;
+        }
+    }
+    pub fn init_mmu(&self) {
+        let satp_value = cpu::build_satp(cpu::SatpMode::Sv39, 0, self.page_table as usize);
+
+        cpu::satp_write(satp_value);
+        cpu::satp_fence_asid(0);
+    }
+    //call after trap frames have been initialized
+    pub fn id_map_kernel(&mut self, alloc: &mut Pmem) {
+        use page::entry_bits;
+        use page::id_map_range;
+        let kheap_head = self.get_head() as usize;
+        let kheap_pages = self.get_allocations();
+        let root = self.get_root();
+        unsafe {
+            println!("TEXT:   0x{:x} -> 0x{:x}", TEXT_START, TEXT_END);
+            println!("RODATA: 0x{:x} -> 0x{:x}", RODATA_START, RODATA_END);
+            println!("DATA:   0x{:x} -> 0x{:x}", DATA_START, DATA_END);
+            println!("BSS:    0x{:x} -> 0x{:x}", BSS_START, BSS_END);
+            println!(
+                "STACK:  0x{:x} -> 0x{:x}",
+                KERNEL_STACK_START, KERNEL_STACK_END
+            );
+            println!(
+                "HEAP:   0x{:x} -> 0x{:x}",
+                kheap_head,
+                kheap_head + kheap_pages * 4096
+            );
+        }
+
+        id_map_range(
+            root,
+            alloc,
+            kheap_head,
+            kheap_head + kheap_pages * PAGE_SIZE,
+            entry_bits::READ_WRITE,
+        );
+
+        id_map_range(
+            root,
+            alloc,
+            alloc.descriptors().as_ptr() as usize,
+            alloc.descriptors().as_ptr() as usize
+                + alloc.descriptors().len() * core::mem::size_of::<page::Page>(),
+            entry_bits::READ_WRITE,
+        );
+        unsafe {
+            id_map_range(root, alloc, TEXT_START, TEXT_END, entry_bits::READ_EXECUTE);
+
+            id_map_range(
+                root,
+                alloc,
+                RODATA_START,
+                RODATA_END,
+                entry_bits::READ_EXECUTE,
+            );
+
+            id_map_range(root, alloc, DATA_START, DATA_END, entry_bits::READ_WRITE);
+
+            id_map_range(root, alloc, BSS_START, BSS_END, entry_bits::READ_WRITE);
+
+            id_map_range(
+                root,
+                alloc,
+                KERNEL_STACK_START,
+                KERNEL_STACK_END,
+                entry_bits::READ_WRITE,
+            );
+
+            let stack = cpu::KERNEL_TRAP_FRAME[0].stack;
+            id_map_range(
+                root,
+                alloc,
+                stack.sub(PAGE_SIZE) as usize,
+                stack as usize,
+                entry_bits::READ_WRITE,
+            );
+            id_map_range(
+                root,
+                alloc,
+                cpu::mscratch_read(),
+                cpu::mscratch_read() + core::mem::size_of::<cpu::TrapFrame>(),
+                entry_bits::READ_WRITE,
+            );
+        }
+
+        id_map_range(root, alloc, 0x10000000, 0x1000000F, entry_bits::READ_WRITE);
     }
 }
 
