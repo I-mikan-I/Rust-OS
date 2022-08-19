@@ -1,3 +1,4 @@
+#![allow(unused)]
 use core::arch::asm;
 #[repr(C)]
 #[derive(Clone, Copy)]

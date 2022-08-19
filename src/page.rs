@@ -186,6 +186,7 @@ pub struct Table {
 #[derive(Copy, Clone)]
 pub struct Entry(u64);
 
+#[allow(unused)]
 pub mod entry_bits {
     type Flag = u64;
     pub const NONE: Flag = 0;
@@ -205,14 +206,6 @@ pub mod entry_bits {
 }
 
 impl Table {
-    pub fn new() -> Self {
-        Self {
-            entries: [Entry(0); 512],
-        }
-    }
-    pub fn len() -> usize {
-        512
-    }
     pub fn map(
         root: &mut Table,
         pmem: &mut Pmem,

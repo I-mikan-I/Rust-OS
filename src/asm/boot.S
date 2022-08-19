@@ -37,6 +37,7 @@ _start:
     csrw mepc, t1
     li t2, 0x888
     csrw mie, t2
+    la ra, 3f
     mret
 
 3:

@@ -99,51 +99,11 @@ static mut MM: Option<Pmem> = None;
 #[no_mangle]
 pub extern "C" fn kmain() {
     println!("This is my operating system!");
-
-    println!("triggering page fault...");
-    unsafe {
-        (0x0 as *mut u64).write_volatile(0);
-    }
-
+    trap::plic::set_threshold(0);
+    trap::plic::enable_interrupt(10);
+    trap::plic::set_priority(10, 1);
     println!("Typing...");
-    loop {
-        if let Some(c) = uart::get_uart().get() {
-            match c {
-                8 => {
-                    print!("{} {}", 8_u8 as char, 8_u8 as char);
-                }
-                10 | 13 => {
-                    println!();
-                }
-                0x1b => {
-                    if let Some(91) = uart::get_uart().get() {
-                        if let Some(b) = uart::get_uart().get() {
-                            match b as char {
-                                'A' => {
-                                    println!("That's the up arrow!");
-                                }
-                                'B' => {
-                                    println!("That's the down arrow!");
-                                }
-                                'C' => {
-                                    println!("That's the right arrow!");
-                                }
-                                'D' => {
-                                    println!("That's the left arrow!");
-                                }
-                                _ => {
-                                    println!("That's something else.....");
-                                }
-                            }
-                        }
-                    }
-                }
-                _ => {
-                    print!("{}", c as char);
-                }
-            }
-        }
-    }
+    loop {}
 }
 
 mod assembly;

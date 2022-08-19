@@ -1,5 +1,5 @@
 use crate::page::{Table, PAGE_SIZE};
-use crate::{cpu, page, Pmem};
+use crate::{cpu, page, trap, Pmem};
 use core::alloc::{GlobalAlloc, Layout};
 use core::cell::RefCell;
 use core::fmt::{Display, Formatter};
@@ -294,63 +294,29 @@ impl Kmem {
             );
         }
 
-        id_map_range(
-            root,
-            alloc,
-            kheap_head,
-            kheap_head + kheap_pages * PAGE_SIZE,
-            entry_bits::READ_WRITE,
-        );
+        macro_rules! id_map_battery {
+            ($($from:expr, $to:expr, $permission:expr);+) => {$(id_map_range(root, alloc, $from, $to, $permission);)+};
+        }
 
-        id_map_range(
-            root,
-            alloc,
-            alloc.descriptors().as_ptr() as usize,
-            alloc.descriptors().as_ptr() as usize
-                + alloc.descriptors().len() * core::mem::size_of::<page::Page>(),
-            entry_bits::READ_WRITE,
-        );
         unsafe {
-            id_map_range(root, alloc, TEXT_START, TEXT_END, entry_bits::READ_EXECUTE);
-
-            id_map_range(
-                root,
-                alloc,
-                RODATA_START,
-                RODATA_END,
-                entry_bits::READ_EXECUTE,
-            );
-
-            id_map_range(root, alloc, DATA_START, DATA_END, entry_bits::READ_WRITE);
-
-            id_map_range(root, alloc, BSS_START, BSS_END, entry_bits::READ_WRITE);
-
-            id_map_range(
-                root,
-                alloc,
-                KERNEL_STACK_START,
-                KERNEL_STACK_END,
-                entry_bits::READ_WRITE,
-            );
-
             let stack = cpu::KERNEL_TRAP_FRAME[0].stack;
-            id_map_range(
-                root,
-                alloc,
-                stack.sub(PAGE_SIZE) as usize,
-                stack as usize,
-                entry_bits::READ_WRITE,
-            );
-            id_map_range(
-                root,
-                alloc,
-                cpu::mscratch_read(),
-                cpu::mscratch_read() + core::mem::size_of::<cpu::TrapFrame>(),
-                entry_bits::READ_WRITE,
+            id_map_battery!(
+                kheap_head, kheap_head + kheap_pages * PAGE_SIZE, entry_bits::READ_WRITE;
+                alloc.descriptors().as_ptr() as usize, alloc.descriptors().as_ptr() as usize + alloc.descriptors().len() * core::mem::size_of::<page::Page>(), entry_bits::READ_WRITE;
+                TEXT_START, TEXT_END, entry_bits::READ_EXECUTE;
+                RODATA_START, RODATA_END, entry_bits::READ_EXECUTE;
+                DATA_START, DATA_END, entry_bits::READ_WRITE;
+                RODATA_START, RODATA_END, entry_bits::READ_WRITE;
+                KERNEL_STACK_START, KERNEL_STACK_END, entry_bits::READ_WRITE;
+                stack.sub(PAGE_SIZE) as usize, stack as usize, entry_bits::READ_WRITE;
+                cpu::mscratch_read(), cpu::mscratch_read() + core::mem::size_of::<cpu::TrapFrame>(), entry_bits::READ_WRITE;
+                0x10000000, 0x1000000F, entry_bits::READ_WRITE
             );
         }
 
-        id_map_range(root, alloc, 0x10000000, 0x1000000F, entry_bits::READ_WRITE);
+        for &address in trap::plic::get_addresses() {
+            id_map_range(root, alloc, address, address, entry_bits::READ_WRITE);
+        }
     }
 }
 
@@ -450,6 +416,6 @@ unsafe impl Sync for KmemAllocator {}
 pub static GA: KmemAllocator = KmemAllocator(RefCell::new(None));
 
 #[alloc_error_handler]
-fn alloc_error_handler(l: core::alloc::Layout) -> ! {
+fn alloc_error_handler(l: Layout) -> ! {
     panic!("could not allocate memory: size: {}", l.size())
 }
