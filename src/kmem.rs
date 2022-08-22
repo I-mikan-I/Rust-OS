@@ -143,7 +143,7 @@ impl Kmem {
     pub fn init(pmem: &mut Pmem) -> Self {
         let k_alloc = pmem.zalloc(1 + (1 << PAGES_POW));
         assert!(k_alloc.available());
-        let head = k_alloc.physical() as *mut BuddyMeta;
+        let head = k_alloc.leak() as *mut BuddyMeta;
         assert!(core::mem::size_of::<BuddyMeta>() <= PAGE_SIZE);
 
         let head_ref = unsafe { &mut *head };
@@ -151,9 +151,9 @@ impl Kmem {
         head_ref.access_mut(0).set_level(0);
         Self {
             head,
-            page_table: pmem.zalloc(1).physical() as *mut Table,
+            page_table: pmem.zalloc(1).leak() as *mut Table,
             alloc: 1 + (1 << PAGES_POW),
-            data_start: unsafe { k_alloc.physical().add(PAGE_SIZE) } as *mut u8,
+            data_start: unsafe { (head as *mut u8).add(PAGE_SIZE) },
         }
     }
     pub fn get_head(&self) -> *const u8 {
@@ -261,7 +261,7 @@ impl Kmem {
             cpu::mscratch_write((&mut cpu::KERNEL_TRAP_FRAME[0] as *mut _) as usize);
             cpu::sscratch_write(cpu::mscratch_read());
             cpu::KERNEL_TRAP_FRAME[0].satp = satp_value;
-            let stack = mm.zalloc(1).physical().add(PAGE_SIZE) as *mut u8;
+            let stack = mm.zalloc(1).leak().add(PAGE_SIZE);
             cpu::KERNEL_TRAP_FRAME[0].stack = stack;
         }
     }
@@ -306,7 +306,7 @@ impl Kmem {
                 TEXT_START, TEXT_END, entry_bits::READ_EXECUTE;
                 RODATA_START, RODATA_END, entry_bits::READ_EXECUTE;
                 DATA_START, DATA_END, entry_bits::READ_WRITE;
-                RODATA_START, RODATA_END, entry_bits::READ_WRITE;
+                BSS_START, BSS_END, entry_bits::READ_WRITE;
                 KERNEL_STACK_START, KERNEL_STACK_END, entry_bits::READ_WRITE;
                 stack.sub(PAGE_SIZE) as usize, stack as usize, entry_bits::READ_WRITE;
                 cpu::mscratch_read(), cpu::mscratch_read() + core::mem::size_of::<cpu::TrapFrame>(), entry_bits::READ_WRITE;

@@ -14,6 +14,8 @@
 use crate::kmem::Kmem;
 use crate::page::{Pmem, Table, PAGE_SIZE};
 use core::arch::asm;
+use core::cell::{RefCell, RefMut};
+use core::ops::DerefMut;
 
 #[macro_export]
 macro_rules! print {
@@ -84,18 +86,24 @@ pub extern "C" fn kinit() {
     println!("\nALLOCATIONS:\n{}", mm);
     #[cfg(debug_assertions)]
     {
-        let p = 0x10000005_usize;
+        let p = 0x800060a8_usize;
         let m = Table::virt_to_phys(kmem.get_root(), p as *const u8).unwrap_or(0);
         assert_eq!(p, m);
     }
     kmem::GA.0.replace(Some(kmem));
     unsafe {
-        MM = Some(mm);
+        MM = Some(RefCell::new(mm));
         KERNEL_TABLE = root_u as usize;
+    }
+
+    unsafe { // enable timer
+        let mtimecmp = 0x0200_4000 as *mut u64;
+        let mtime = 0x0200_bff8 as *const u64;
+        mtimecmp.write_volatile(mtime.read_volatile() + 10_000_000);
     }
 }
 
-static mut MM: Option<Pmem> = None;
+static mut MM: Option<RefCell<Pmem>> = None;
 #[no_mangle]
 pub extern "C" fn kmain() {
     println!("This is my operating system!");
@@ -106,9 +114,14 @@ pub extern "C" fn kmain() {
     loop {}
 }
 
+pub fn get_mm() -> RefMut<'static, Pmem> {
+    unsafe { MM.as_mut().unwrap().borrow_mut() }
+}
+
 mod assembly;
 mod cpu;
 mod kmem;
 mod page;
+mod process;
 mod trap;
 mod uart;

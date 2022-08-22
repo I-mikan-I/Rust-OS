@@ -1,8 +1,10 @@
+use crate::get_mm;
 use crate::page::PageBits::{Empty, Last, Taken};
 use core::cmp::max;
 use core::fmt::{Display, Formatter};
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
+use core::ops::DerefMut;
 
 // ========================= PAGES =========================
 
@@ -39,6 +41,22 @@ impl IPage {
     }
     pub fn physical(&self) -> *const u8 {
         self.1
+    }
+    pub fn leak(mut self) -> *mut u8 {
+        self.0 = usize::MAX;
+        self.1
+    }
+}
+
+impl Drop for IPage {
+    fn drop(&mut self) {
+        if !self.available() {
+            return;
+        }
+        let mut pm = get_mm();
+        let pm = pm.deref_mut();
+        let clone = IPage(self.0, self.1);
+        pm.dealloc(clone);
     }
 }
 
@@ -228,7 +246,7 @@ impl Table {
             if !v.is_valid() {
                 let page = pmem.zalloc(1);
                 assert!(page.available(), "out of memory");
-                v.set_entry(page.physical() as u64 >> 2 | entry_bits::VALID);
+                v.set_entry(page.leak() as u64 >> 2 | entry_bits::VALID);
             }
             let next = v.get_phys() as *mut Table;
             current = unsafe { &mut *next };

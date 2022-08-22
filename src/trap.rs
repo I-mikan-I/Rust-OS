@@ -18,6 +18,7 @@ extern "C" fn m_trap(
                 println!("Machine software interrupt CPU#{}", hart);
             }
             7 => unsafe {
+                println!("Timer interrupt...");
                 let timecmp = 0x02004000 as *mut u64;
                 let time = 0x0200bff8 as *const u64;
                 timecmp.write_volatile(time.read_volatile() + 10_000_000);
@@ -95,25 +96,22 @@ extern "C" fn m_trap(
                 panic!("E-call from Machine mode! CPU#{} -> 0x{:08x}", hart, epc);
             }
             12 => {
-                println!(
+                panic!(
                     "Instruction page fault CPU#{} -> 0x{:08x}: 0x{:08x}",
                     hart, epc, tval
                 );
-                epc += 4;
             }
             13 => {
-                println!(
+                panic!(
                     "Load page fault CPU#{} -> 0x{:08x}: 0x{:08x}",
                     hart, epc, tval
                 );
-                epc += 4;
             }
             15 => {
-                println!(
+                panic!(
                     "Store page fault CPU#{} -> 0x{:08x}: 0x{:08x}",
                     hart, epc, tval
                 );
-                epc += 4;
             }
             _ => {
                 panic!("unhandled sync trap CPU#{} -> {}", hart, cause);
