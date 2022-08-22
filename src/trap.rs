@@ -1,5 +1,7 @@
 use crate::cpu::TrapFrame;
-use crate::uart;
+use crate::sched::schedule;
+use crate::syscall::do_syscall;
+use crate::{switch_to_user, uart};
 
 #[no_mangle]
 extern "C" fn m_trap(
@@ -19,9 +21,11 @@ extern "C" fn m_trap(
             }
             7 => unsafe {
                 println!("Timer interrupt...");
+                let (frame, mepc, satp) = schedule();
                 let timecmp = 0x02004000 as *mut u64;
                 let time = 0x0200bff8 as *const u64;
                 timecmp.write_volatile(time.read_volatile() + 10_000_000);
+                switch_to_user(frame as usize, mepc, satp);
             },
             11 => {
                 if let Some(interrupt) = plic::claim() {
@@ -86,11 +90,11 @@ extern "C" fn m_trap(
             }
             8 => {
                 println!("E-call from User mode! CPU#{} -> 0x{:08x}", hart, epc);
-                epc += 4;
+                epc = do_syscall(epc, frame);
             }
             9 => {
                 println!("E-call from Supervisor mode! CPU#{} -> 0x{:08x}", hart, epc);
-                epc += 4;
+                epc = do_syscall(epc, frame);
             }
             11 => {
                 panic!("E-call from Machine mode! CPU#{} -> 0x{:08x}", hart, epc);

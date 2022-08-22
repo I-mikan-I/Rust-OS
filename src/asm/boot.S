@@ -25,19 +25,7 @@ _start:
     csrw    mie, zero
     la		t1, kinit
     csrw	mepc, t1
-    la		ra, 2f
-    mret
-
-2:
-    li t0, (0b01 << 11) | (1 << 7) | (1 << 5)
-    csrw mstatus, t0
-    la t2, asm_trap_vector
-    csrw mtvec, t2
-    la t1, kmain
-    csrw mepc, t1
-    li t2, 0x888
-    csrw mie, t2
-    la ra, 3f
+    la		ra, 3f
     mret
 
 3:

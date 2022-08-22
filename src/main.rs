@@ -15,7 +15,6 @@ use crate::kmem::Kmem;
 use crate::page::{Pmem, Table, PAGE_SIZE};
 use core::arch::asm;
 use core::cell::{RefCell, RefMut};
-use core::ops::DerefMut;
 
 #[macro_export]
 macro_rules! print {
@@ -69,6 +68,7 @@ pub extern "C" fn abort() -> ! {
 
 extern "C" {
     static mut KERNEL_TABLE: usize;
+    fn switch_to_user(frame: usize, mepc: usize, satp: usize) -> !;
 }
 
 #[no_mangle]
@@ -78,7 +78,7 @@ pub extern "C" fn kinit() {
 
     let mut mm = Pmem::init();
     let mut kmem = Kmem::init(&mut mm);
-    kmem.init_mmu();
+    //kmem.init_mmu();
     kmem.init_trap_memory(&mut mm);
     kmem.id_map_kernel(&mut mm);
     let root_u: *mut Table = kmem.get_root();
@@ -95,24 +95,27 @@ pub extern "C" fn kinit() {
         MM = Some(RefCell::new(mm));
         KERNEL_TABLE = root_u as usize;
     }
+    sched::init();
 
-    unsafe { // enable timer
+    trap::plic::set_threshold(0);
+    trap::plic::enable_interrupt(10);
+    trap::plic::set_priority(10, 1);
+
+    let (frame, mepc, satp) = sched::schedule();
+    assert!(!frame.is_null(), "no user process");
+
+    unsafe {
+        // enable timer
         let mtimecmp = 0x0200_4000 as *mut u64;
         let mtime = 0x0200_bff8 as *const u64;
         mtimecmp.write_volatile(mtime.read_volatile() + 10_000_000);
+
+        // user mode
+        switch_to_user(frame as usize, mepc, satp);
     }
 }
 
 static mut MM: Option<RefCell<Pmem>> = None;
-#[no_mangle]
-pub extern "C" fn kmain() {
-    println!("This is my operating system!");
-    trap::plic::set_threshold(0);
-    trap::plic::enable_interrupt(10);
-    trap::plic::set_priority(10, 1);
-    println!("Typing...");
-    loop {}
-}
 
 pub fn get_mm() -> RefMut<'static, Pmem> {
     unsafe { MM.as_mut().unwrap().borrow_mut() }
@@ -123,5 +126,7 @@ mod cpu;
 mod kmem;
 mod page;
 mod process;
+mod sched;
+mod syscall;
 mod trap;
 mod uart;

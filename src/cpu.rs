@@ -31,8 +31,8 @@ pub enum SatpMode {
 
 pub static mut KERNEL_TRAP_FRAME: [TrapFrame; 8] = [TrapFrame::zero(); 8];
 
-pub const fn build_satp(mode: SatpMode, asid: usize, addr: usize) -> usize {
-    (mode as usize) << 60 | (asid & 0xffff) << 44 | (addr >> 12) & 0xff_ffff_ffff
+pub const fn build_satp(mode: SatpMode, asid: u16, addr: usize) -> usize {
+    (mode as usize) << 60 | (asid as usize) << 44 | (addr >> 12) & 0xff_ffff_ffff
 }
 
 pub fn mhartid_read() -> usize {
